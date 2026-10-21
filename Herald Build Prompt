@@ -1,0 +1,59 @@
+Build an n8n workflow called "Herald" that sends personalized bulk emails, with a human approving the draft before anything is sent.
+
+GOAL
+The user gives a short brief about an email (any kind: announcement, promotion, reminder, invitation, update). AI writes ONE email body for the whole list. The user reviews and approves it. Then the workflow sends it to every contact, with only the recipient's name changing, and logs the result for each person.
+
+STEP 1: INPUT FORM
+- Use an n8n Form Trigger with these fields:
+  - Email purpose / brief (long text)
+  - Tone (dropdown: Formal, Friendly, Persuasive, Casual)
+  - Sender name (text)
+  - Subject line (text, optional; if empty, AI suggests one)
+  - Attachment mode (dropdown: "No attachment", "Same file for everyone", "Different file per person")
+  - Attachment file (file upload, used only for "Same file for everyone")
+  - Contact list: Google Sheet URL (text)
+
+STEP 2: READ CONTACTS
+- Use a Google Sheets node to read all rows from the sheet.
+- Expected columns: name, email, status, attachment_file (attachment_file only used in "Different file per person" mode).
+- Skip rows with an empty or invalid email, and skip rows where status is already "sent".
+
+STEP 3: AI DRAFTING
+- Use an AI node (Anthropic Claude or OpenAI chat model) that runs ONCE, not once per contact.
+- Instruction to the AI: write one email from the brief and tone. Start with "Hi {{name}}," using the literal placeholder {{name}}. Keep it clear, professional and under 200 words unless the brief needs more. End with the sender name. Return JSON with two fields: "subject" and "body".
+- Parse the JSON output.
+
+STEP 4: HUMAN APPROVAL
+- Send the draft (subject and body) to the user for review using a "Send and wait for response" action (Gmail, Telegram or Slack).
+- Options: Approve, or Reject with feedback.
+- If rejected, send the feedback back to the AI node to redraft, then ask for approval again (maximum 3 redraft rounds).
+- Do not continue to sending until the user approves.
+
+STEP 5: PERSONALIZE AND LOOP
+- Use Loop Over Items (batch size 1) across the contacts.
+- For each contact, replace {{name}} in the approved body and subject with that contact's name. If the name is empty, use "there".
+
+STEP 6: ATTACHMENTS
+- If "No attachment": send without a file.
+- If "Same file for everyone": attach the uploaded file to every email.
+- If "Different file per person": fetch the file named in the attachment_file column from Google Drive and attach it to that person's email only. If the file is not found, skip that person and log the error.
+
+STEP 7: SEND
+- Use the Send Email node (SMTP) so it works with Gmail, Yahoo, Proton, Outlook or any company mail server.
+- Send as HTML with a plain-text fallback.
+
+STEP 8: PACING
+- Add a Wait node (random 5 to 15 seconds) between sends to avoid being flagged as spam.
+- Add a daily cap setting (default 200). If the cap is reached, stop and mark the remaining contacts as "pending".
+
+STEP 9: LOGGING AND ERRORS
+- After each send, update that row in the Google Sheet: status = "sent" or "failed", plus a timestamp and the error message if it failed.
+- Set "Continue on error" on the send node so one bad address does not stop the whole run.
+- At the end, send the user a summary: total sent, failed, skipped, pending.
+
+REQUIREMENTS
+- Add a sticky note on each stage explaining what it does.
+- Name every node clearly (for example "Read Contacts", "Draft Email with AI", "Wait for Approval").
+- Leave credential fields empty for me to fill in (SMTP, Google Sheets, Google Drive, AI model, approval channel).
+- Do not hardcode any email addresses or secrets.
+- Include a test mode: if switched on, send only to the first 3 contacts.
