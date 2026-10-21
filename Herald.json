@@ -1,0 +1,1713 @@
+{
+  "name": "Herald",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Herald: bulk email brief",
+        "formDescription": "Describe the email once. AI drafts it, you approve it, then Herald sends it to every contact.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Email purpose / brief",
+              "fieldType": "textarea",
+              "placeholder": "e.g. Announce our new feature and invite people to the webinar on Friday",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Tone",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Formal"
+                  },
+                  {
+                    "option": "Friendly"
+                  },
+                  {
+                    "option": "Persuasive"
+                  },
+                  {
+                    "option": "Casual"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Sender name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Subject line (optional)",
+              "placeholder": "Leave empty and AI will suggest one"
+            },
+            {
+              "fieldLabel": "Attachment mode",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "No attachment"
+                  },
+                  {
+                    "option": "Same file for everyone"
+                  },
+                  {
+                    "option": "Different file per person"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Attachment file",
+              "fieldType": "file",
+              "multipleFiles": false
+            },
+            {
+              "fieldLabel": "Contact list Google Sheet URL",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Test mode",
+              "fieldType": "dropdown",
+              "defaultValue": "Off",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Off"
+                  },
+                  {
+                    "option": "On (send to first 3 contacts only)"
+                  }
+                ]
+              },
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "buttonLabel": "Draft my email",
+          "path": "herald",
+          "respondWithOptions": {
+            "values": {
+              "formSubmittedText": "Got it. Check your approval inbox for the draft. Nothing is sent until you approve."
+            }
+          }
+        }
+      },
+      "id": "180e3951-195c-458c-b7ba-3ca8e21d21c0",
+      "name": "Herald Brief Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        96
+      ],
+      "webhookId": "d4b31841-2c17-43ce-a5c0-4c640d8a02f4"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "brief",
+              "type": "string",
+              "value": "={{ $json['Email purpose / brief'] }}"
+            },
+            {
+              "id": "a2",
+              "name": "tone",
+              "type": "string",
+              "value": "={{ $json['Tone'] }}"
+            },
+            {
+              "id": "a3",
+              "name": "senderName",
+              "type": "string",
+              "value": "={{ $json['Sender name'] }}"
+            },
+            {
+              "id": "a4",
+              "name": "userSubject",
+              "type": "string",
+              "value": "={{ ($json['Subject line (optional)'] || '').trim() }}"
+            },
+            {
+              "id": "a5",
+              "name": "attachmentMode",
+              "type": "string",
+              "value": "={{ $json['Attachment mode'] }}"
+            },
+            {
+              "id": "a6",
+              "name": "sheetUrl",
+              "type": "string",
+              "value": "={{ $json['Contact list Google Sheet URL'] }}"
+            },
+            {
+              "id": "a7",
+              "name": "testMode",
+              "type": "boolean",
+              "value": "={{ String($json['Test mode'] || '').startsWith('On') }}"
+            },
+            {
+              "id": "a8",
+              "name": "dailyCap",
+              "type": "number",
+              "value": 200
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ca0fa19e-1b61-4416-8022-37651475e84a",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        272,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $json.sheetUrl }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "options": {}
+      },
+      "id": "25fab6f4-1bd7-4c37-b817-0fcfd130aeee",
+      "name": "Read Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        496,
+        224
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "3i14fy0V8Fqwoxau",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Settings').first().json;\nconst emailRe = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst today = $now.toFormat('yyyy-MM-dd');\nlet sentToday = 0;\nlet skipped = 0;\nconst seen = {};\nconst valid = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  const email = String(r.email || '').trim();\n  const status = String(r.status || '').trim().toLowerCase();\n  if (status === 'sent') {\n    if (String(r.sent_at || '').startsWith(today)) sentToday++;\n    skipped++;\n    continue;\n  }\n  if (!emailRe.test(email) || seen[email.toLowerCase()]) {\n    skipped++;\n    continue;\n  }\n  seen[email.toLowerCase()] = true;\n  valid.push({ name: String(r.name || '').trim(), email: email, attachment_file: String(r.attachment_file || '').trim() });\n}\nconst queue = cfg.testMode ? valid.slice(0, 3) : valid;\nconst remaining = Math.max(0, Number(cfg.dailyCap) - sentToday);\nreturn queue.map((c, idx) => ({\n  json: Object.assign({}, c, { route: idx < remaining ? 'send' : 'pending', skipped: skipped }),\n}));"
+      },
+      "id": "accd993c-2b5d-4738-a475-2e4a2bf66a16",
+      "name": "Filter Contacts and Apply Cap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "brief",
+              "type": "string",
+              "value": "={{ $('Settings').first().json.brief }}"
+            },
+            {
+              "id": "b2",
+              "name": "tone",
+              "type": "string",
+              "value": "={{ $('Settings').first().json.tone }}"
+            },
+            {
+              "id": "b3",
+              "name": "senderName",
+              "type": "string",
+              "value": "={{ $('Settings').first().json.senderName }}"
+            },
+            {
+              "id": "b4",
+              "name": "userSubject",
+              "type": "string",
+              "value": "={{ $('Settings').first().json.userSubject }}"
+            },
+            {
+              "id": "b5",
+              "name": "feedback",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "b6",
+              "name": "previousBody",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9c389503-0156-4291-94f6-20be849bf2f6",
+      "name": "Prepare Draft Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        800,
+        304
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "claude-sonnet-5-5"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Write one email for this brief.\\n\\nBrief: {{ $json.brief }}\\nTone: {{ $json.tone }}\\nSender name: {{ $json.senderName }}\\nSubject: {{ $json.userSubject ? \"Use exactly this subject: \" + $json.userSubject : \"Suggest a fitting subject line.\" }}{{ $json.feedback ? \"\\n\\nYour previous draft was rejected. Reviewer feedback: \" + $json.feedback + \"\\n\\nPrevious draft:\\n\" + $json.previousBody + \"\\n\\nRewrite it so it addresses the feedback.\" : \"\" }}"
+            }
+          ]
+        },
+        "options": {
+          "includeMergedResponse": true,
+          "system": "You write one email that will be sent to a whole contact list. Start the body with \"Hi {{name}},\" using the literal placeholder {{name}} exactly as written. Keep it clear, professional and under 200 words unless the brief needs more. End with the sender name. Use plain text with blank lines between paragraphs. Do not invent facts, links or dates that are not in the brief. Return ONLY valid JSON with exactly two string fields, \"subject\" and \"body\". No markdown, no code fences.",
+          "maxTokens": 1500
+        }
+      },
+      "id": "37ce868e-04a0-40fc-b017-5953facce7ee",
+      "name": "Draft Email with AI",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [
+        1024,
+        304
+      ],
+      "executeOnce": true,
+      "credentials": {
+        "anthropicApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nlet text = raw.merged_response || '';\nif (!text && Array.isArray(raw.content)) {\n  const block = raw.content.find((c) => c.type === 'text');\n  text = block ? block.text : '';\n}\nconst start = text.indexOf('{');\nconst end = text.lastIndexOf('}');\nif (start === -1 || end === -1) {\n  throw new Error('The AI did not return JSON. Raw output: ' + text.slice(0, 300));\n}\nconst parsed = JSON.parse(text.slice(start, end + 1));\nconst userSubject = $('Prepare Draft Input').first().json.userSubject;\nconst subject = userSubject || String(parsed.subject || '').trim();\nconst body = String(parsed.body || '').trim();\nconst esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nreturn [{ json: { subject: subject, body: body, bodyHtml: esc(body).replace(/\\n/g, '<br>'), round: $runIndex } }];"
+      },
+      "id": "51ea38e1-d930-4f9e-b684-0e751dd9ba64",
+      "name": "Parse Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "jubrilabisade@gmail.com",
+        "subject": "=Herald draft for approval (round {{ $json.round + 1 }} of 4): {{ $json.subject }}",
+        "message": "=<p><b>Subject:</b> {{ $json.subject }}</p><p>{{ $json.bodyHtml }}</p><p>Choose <b>Approve</b> to send this to every contact, or <b>Reject</b> and say what to change. The name placeholder is replaced with each contact's name.</p>",
+        "responseType": "customForm",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Decision",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Approve"
+                  },
+                  {
+                    "option": "Reject"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Feedback",
+              "fieldType": "textarea",
+              "placeholder": "Required if you reject: what should change?"
+            }
+          ]
+        },
+        "options": {
+          "responseFormTitle": "Review Herald draft",
+          "appendAttribution": false
+        }
+      },
+      "id": "0b9b8cbf-0861-4b9e-b8e5-21ab9ddb38bd",
+      "name": "Wait for Approval",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1600,
+        224
+      ],
+      "webhookId": "bfd12609-df3f-4e39-89e7-931bc07e155e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "YsrYq4GA83t8KuOX",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.data.Decision }}",
+              "rightValue": "Approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0298bf42-7047-4fa1-aff2-b5dc7800d307",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1824,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const draft = $('Parse Draft').last().json;\nreturn $('Filter Contacts and Apply Cap').all().map((i) => ({\n  json: Object.assign({}, i.json, { subject: draft.subject, body: draft.body }),\n}));"
+      },
+      "id": "3eaa765d-6c15-4bd1-8926-933794a946da",
+      "name": "Attach Approved Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2048,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c3",
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "send",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8b24dd31-4ed3-4917-947f-f0f9d2b1f7f9",
+      "name": "Within Daily Cap?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1280,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all().map((i) => i.json);\nconst sent = results.filter((r) => r.status === 'sent').length;\nconst failed = results.filter((r) => r.status === 'failed').length;\nconst plan = $('Filter Contacts and Apply Cap').all();\nconst pending = plan.filter((i) => i.json.route === 'pending').length;\nconst skipped = plan.length ? plan[0].json.skipped : 0;\nconst subject = $('Parse Draft').last().json.subject;\nconst text = 'Herald run finished.\\n\\nSubject: ' + subject + '\\nSent: ' + sent + '\\nFailed: ' + failed + '\\nSkipped (empty/invalid email, duplicate or already sent): ' + skipped + '\\nPending (daily cap reached): ' + pending + '\\n\\nFailed rows have the error message in the sheet.';\nreturn [{ json: { sent: sent, failed: failed, skipped: skipped, pending: pending, text: text } }];"
+      },
+      "id": "36007104-0d75-46a1-aca8-cd95b3462015",
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        128
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "fromEmail": "jubrilabisade@gmail.com",
+        "toEmail": "adedejijubrilabisade@gmail.com",
+        "subject": "=Herald summary: {{ $json.sent }} sent, {{ $json.failed }} failed",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "a9446951-1a2e-4d18-8ea5-98bb5a030b45",
+      "name": "Send Summary",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2304,
+        128
+      ],
+      "webhookId": "652219db-2231-4f8a-9a91-7bfe29ab6484",
+      "credentials": {
+        "smtp": {
+          "id": "rX17USAPXzNXUIes",
+          "name": "SMTP account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const c = $json;\nconst first = String(c.name || '').trim() || 'there';\nconst fill = (s) => String(s).replace(/\\{\\{\\s*name\\s*\\}\\}/gi, first);\nconst subject = fill(c.subject);\nconst text = fill(c.body);\nconst esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst paragraphs = esc(text).split(/\\n{2,}/).map((p) => '<p style=\"margin:0 0 14px 0;\">' + p.replace(/\\n/g, '<br>') + '</p>').join('');\nconst html = '<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.5;color:#222;\">' + paragraphs + '</div>';\nreturn { json: { toEmail: c.email, name: c.name, attachment_file: c.attachment_file, subject: subject, text: text, html: html } };"
+      },
+      "id": "38dd0410-4d10-4ac5-bfbd-ded4d6ea95da",
+      "name": "Personalize Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Settings').first().json.attachmentMode }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "No attachment"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "No attachment"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Settings').first().json.attachmentMode }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "Same file for everyone"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Same file"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Settings').first().json.attachmentMode }}",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "rightValue": "Different file per person"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Different file"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1a454745-b009-426b-9c1d-e4ba440b9211",
+      "name": "Attachment Mode",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1776,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "jubrilabisade@gmail.com",
+        "toEmail": "={{ $('Personalize Email').item.json.toEmail }}",
+        "subject": "={{ $('Personalize Email').item.json.subject }}",
+        "emailFormat": "both",
+        "text": "={{ $('Personalize Email').item.json.text }}",
+        "html": "={{ $('Personalize Email').item.json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "fileAttachments": "={{ $('Settings').first().json.attachmentMode === 'No attachment' ? '' : 'attachment' }}"
+        }
+      },
+      "id": "58bfee68-80a5-4090-8f82-f91f4d094d75",
+      "name": "Send Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        2896,
+        160
+      ],
+      "webhookId": "9024456d-cfac-4564-b67d-fd88fb965ba0",
+      "credentials": {
+        "smtp": {
+          "id": "rX17USAPXzNXUIes",
+          "name": "SMTP account 2"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $('Personalize Email').item.json.toEmail }}"
+            },
+            {
+              "id": "f2",
+              "name": "status",
+              "type": "string",
+              "value": "sent"
+            },
+            {
+              "id": "f3",
+              "name": "sent_at",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "id": "f4",
+              "name": "error",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ae2e3d18-01f8-4d92-a9c7-0f885426a175",
+      "name": "Set Sent Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3120,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Settings').first().json.sheetUrl }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $json.email }}",
+            "status": "={{ $json.status }}",
+            "sent_at": "={{ $json.sent_at }}",
+            "error": "={{ $json.error }}"
+          },
+          "matchingColumns": [
+            "email"
+          ],
+          "schema": [
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "sent_at",
+              "displayName": "sent_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bfe8b8da-fb04-418e-bb4b-454f4a25978e",
+      "name": "Log Result in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3344,
+        336
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "3i14fy0V8Fqwoxau",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "g1",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $('Personalize Email').item.json.toEmail }}"
+            },
+            {
+              "id": "g2",
+              "name": "status",
+              "type": "string",
+              "value": "failed"
+            },
+            {
+              "id": "g3",
+              "name": "sent_at",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "id": "g4",
+              "name": "error",
+              "type": "string",
+              "value": "={{ ($json.error && ($json.error.message || $json.error.description)) || String($json.error || 'Send failed') }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3554ec79-4f6c-49e4-9dc1-70712b2a76eb",
+      "name": "Set Failed Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3568,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 11) + 5 }}"
+      },
+      "id": "ad66abd1-208e-4e9c-aba1-a8a1ba4f1a42",
+      "name": "Random Pause 5-15s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3568,
+        256
+      ],
+      "webhookId": "d0053778-d857-4df5-b9ea-2d8cda013045"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "50c6a776-16cc-4326-9124-e556b31ad2ca",
+      "name": "Loop Over Contacts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        3792,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const bin = $('Herald Brief Form').first().binary || {};\nconst key = Object.keys(bin)[0];\nif (!key) {\n  throw new Error('Attachment mode is \"Same file for everyone\" but no file was uploaded in the form.');\n}\nreturn { json: $json, binary: { attachment: bin[key] } };"
+      },
+      "id": "b78fef4d-ebe7-4aa5-8e86-ceda1be0d881",
+      "name": "Attach Uploaded File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c4",
+              "leftValue": "={{ $json.attachment_file }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "1a4c19ed-7823-4ffa-bc26-8eedc2eceb88",
+      "name": "Has Attachment File Name?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2000,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "={{ $json.attachment_file }}",
+        "limit": 1,
+        "filter": {
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "id": "798e8e9d-fc88-4e85-9ac1-b4ce7649c948",
+      "name": "Find File in Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2224,
+        368
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "1iSFUF5MK5AmAyOf",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c5",
+              "leftValue": "={{ $json.id }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "rightValue": ""
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f054deec-6408-4fab-a2bc-5977e885db34",
+      "name": "File Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2448,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "options": {
+          "binaryPropertyName": "attachment"
+        }
+      },
+      "id": "0a3f651e-08ed-459b-bb8c-af10a274a483",
+      "name": "Download Drive File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2672,
+        320
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "1iSFUF5MK5AmAyOf",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e1",
+              "name": "email",
+              "type": "string",
+              "value": "={{ $('Personalize Email').item.json.toEmail }}"
+            },
+            {
+              "id": "e2",
+              "name": "status",
+              "type": "string",
+              "value": "failed"
+            },
+            {
+              "id": "e3",
+              "name": "sent_at",
+              "type": "string",
+              "value": "={{ $now.toISO() }}"
+            },
+            {
+              "id": "e4",
+              "name": "error",
+              "type": "string",
+              "value": "={{ $('Personalize Email').item.json.attachment_file ? 'Attachment not found in Google Drive: ' + $('Personalize Email').item.json.attachment_file : 'attachment_file column is empty for this contact' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f4778249-1f63-4660-8677-815d44a851b6",
+      "name": "Set Attachment Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2672,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $('Settings').first().json.sheetUrl }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $json.email }}",
+            "status": "pending",
+            "sent_at": "",
+            "error": ""
+          },
+          "matchingColumns": [
+            "email"
+          ],
+          "schema": [
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "sent_at",
+              "displayName": "sent_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "error",
+              "displayName": "error",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "49cf9f3c-b8d3-4c00-a909-063da67c1f91",
+      "name": "Mark Pending in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1664,
+        192
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "3i14fy0V8Fqwoxau",
+          "name": "Google Sheets account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $('Parse Draft').item.json.round }}",
+              "rightValue": 3,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dbc8ab46-d41d-4da1-b809-804e9e160f44",
+      "name": "Redraft Rounds Left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2048,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1",
+              "name": "brief",
+              "type": "string",
+              "value": "={{ $('Prepare Draft Input').first().json.brief }}"
+            },
+            {
+              "id": "d2",
+              "name": "tone",
+              "type": "string",
+              "value": "={{ $('Prepare Draft Input').first().json.tone }}"
+            },
+            {
+              "id": "d3",
+              "name": "senderName",
+              "type": "string",
+              "value": "={{ $('Prepare Draft Input').first().json.senderName }}"
+            },
+            {
+              "id": "d4",
+              "name": "userSubject",
+              "type": "string",
+              "value": "={{ $('Prepare Draft Input').first().json.userSubject }}"
+            },
+            {
+              "id": "d5",
+              "name": "feedback",
+              "type": "string",
+              "value": "={{ $json.data.Feedback || 'No specific feedback given. Improve clarity and tone.' }}"
+            },
+            {
+              "id": "d6",
+              "name": "previousBody",
+              "type": "string",
+              "value": "={{ $('Parse Draft').item.json.body }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "113da441-de48-4a2a-8644-20eebde57e36",
+      "name": "Prepare Redraft",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2272,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "Herald stopped: the draft was rejected 4 times (the first draft plus 3 redrafts). Nothing was sent. Start again with a clearer brief."
+      },
+      "id": "7cdc9ebd-8e7f-4db6-b769-30541ba63ab9",
+      "name": "Stop: Redraft Limit Reached",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        2272,
+        592
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 1. Brief and settings\nThe Form Trigger collects the brief, tone, sender name, optional subject, attachment mode, optional file, the Google Sheet URL and a Test mode switch. \"Settings\" cleans these values and holds the daily cap (default 200). Edit dailyCap there.",
+        "height": 224,
+        "width": 160,
+        "color": 4
+      },
+      "id": "83fc125a-f091-4e32-9c60-e5adfe5ccdfe",
+      "name": "Note: Brief and settings",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Read and clean contacts\nReads every row (columns: name, email, status, attachment_file; add sent_at and error columns for logging). Skips empty or invalid emails, duplicates and rows already \"sent\". Test mode keeps only the first 3. Contacts past the daily cap (minus rows already sent today) become \"pending\".",
+        "height": 224,
+        "width": 384,
+        "color": 5
+      },
+      "id": "b3637231-3e4a-4a9c-989c-330de9bf0906",
+      "name": "Note: Read contacts",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        464,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. AI draft and approval\nClaude writes ONE email with a {{name}} placeholder (runs once, not per contact). You get it by email with Approve / Reject + feedback. Rejections go back to the AI, up to 3 redrafts. Nothing is sent before you approve.",
+        "height": 304,
+        "width": 1088,
+        "color": 6
+      },
+      "id": "0d2e7084-212b-41c6-963a-104ee774872e",
+      "name": "Note: Draft and approval",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        768,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. Queue approved contacts\nAttaches the approved subject and body to each contact. Contacts over the daily cap are marked \"pending\" in the sheet and not sent.",
+        "height": 352,
+        "width": 992,
+        "color": 3
+      },
+      "id": "9c8b1462-de79-4ba7-9a4e-b4ff3d374cf9",
+      "name": "Note: Queue contacts",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 5. Personalize, attach and send\nLoops one contact at a time. Replaces {{name}} (or \"there\" if empty), builds HTML plus a plain-text fallback, adds the attachment per mode (uploaded file, or the Drive file named in attachment_file; missing file = skipped and logged), sends over SMTP, then logs sent/failed with timestamp and error to the sheet. A random 5-15 second pause follows each contact. A failed send does not stop the run.",
+        "height": 640,
+        "width": 2320,
+        "color": 2
+      },
+      "id": "a8cd5b9b-e273-407a-a623-309e4264eaf9",
+      "name": "Note: Send loop",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1520,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 6. Run summary\nWhen the loop ends, emails you totals: sent, failed, skipped and pending.",
+        "height": 224,
+        "width": 384,
+        "color": 7
+      },
+      "id": "09bf1ec1-1ac9-42ad-b897-db08a3d0d5cb",
+      "name": "Note: Summary",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2048,
+        32
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Herald Brief Form": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Read Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Contacts": {
+      "main": [
+        [
+          {
+            "node": "Filter Contacts and Apply Cap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Contacts and Apply Cap": {
+      "main": [
+        [
+          {
+            "node": "Prepare Draft Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Draft Input": {
+      "main": [
+        [
+          {
+            "node": "Draft Email with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Email with AI": {
+      "main": [
+        [
+          {
+            "node": "Parse Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Draft": {
+      "main": [
+        [
+          {
+            "node": "Wait for Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Attach Approved Draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Redraft Rounds Left?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Approved Draft": {
+      "main": [
+        [
+          {
+            "node": "Within Daily Cap?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within Daily Cap?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Pending in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Send Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Personalize Email": {
+      "main": [
+        [
+          {
+            "node": "Attachment Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attachment Mode": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Attach Uploaded File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Has Attachment File Name?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Set Sent Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Failed Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Sent Result": {
+      "main": [
+        [
+          {
+            "node": "Log Result in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Result in Sheet": {
+      "main": [
+        [
+          {
+            "node": "Random Pause 5-15s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Failed Result": {
+      "main": [
+        [
+          {
+            "node": "Log Result in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Random Pause 5-15s": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Contacts": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Personalize Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Uploaded File": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Attachment File Name?": {
+      "main": [
+        [
+          {
+            "node": "Find File in Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Attachment Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find File in Drive": {
+      "main": [
+        [
+          {
+            "node": "File Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "File Found?": {
+      "main": [
+        [
+          {
+            "node": "Download Drive File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Attachment Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Drive File": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Attachment Error": {
+      "main": [
+        [
+          {
+            "node": "Log Result in Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redraft Rounds Left?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Redraft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop: Redraft Limit Reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Redraft": {
+      "main": [
+        [
+          {
+            "node": "Draft Email with AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "dynamic",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "47f1947f-e2c2-4a00-9c40-cfe821518f21",
+  "meta": {
+    "instanceId": "45e736db475c23b80da4def66a13d6e9493b92c3f03ff204ed67587395781a2b"
+  },
+  "nodeGroups": [
+    {
+      "id": "6d0a78eb-602c-4e2e-9ec8-730433ddf213",
+      "name": "Read contacts",
+      "nodeIds": [
+        "ca0fa19e-1b61-4416-8022-37651475e84a",
+        "25fab6f4-1bd7-4c37-b817-0fcfd130aeee",
+        "accd993c-2b5d-4738-a475-2e4a2bf66a16"
+      ],
+      "description": "Takes the form input, reads the sheet, drops bad or already-sent rows, applies test mode and the daily cap"
+    },
+    {
+      "id": "f4be6389-58d1-4809-8f72-b24396ddcf58",
+      "name": "Draft and approve",
+      "nodeIds": [
+        "9c389503-0156-4291-94f6-20be849bf2f6",
+        "37ce868e-04a0-40fc-b017-5953facce7ee",
+        "51ea38e1-d930-4f9e-b684-0e751dd9ba64",
+        "0b9b8cbf-0861-4b9e-b8e5-21ab9ddb38bd",
+        "0298bf42-7047-4fa1-aff2-b5dc7800d307",
+        "dbc8ab46-d41d-4da1-b809-804e9e160f44",
+        "113da441-de48-4a2a-8644-20eebde57e36",
+        "7cdc9ebd-8e7f-4db6-b769-30541ba63ab9",
+        "3eaa765d-6c15-4bd1-8926-933794a946da"
+      ],
+      "description": "AI writes one email, you approve or reject by email; rejections redraft up to 3 times before stopping"
+    },
+    {
+      "id": "8f81bfda-d92c-4a79-b962-0783a2dbe069",
+      "name": "Send personalised emails",
+      "nodeIds": [
+        "50c6a776-16cc-4326-9124-e556b31ad2ca",
+        "38dd0410-4d10-4ac5-bfbd-ded4d6ea95da",
+        "1a454745-b009-426b-9c1d-e4ba440b9211",
+        "b78fef4d-ebe7-4aa5-8e86-ceda1be0d881",
+        "1a4c19ed-7823-4ffa-bc26-8eedc2eceb88",
+        "798e8e9d-fc88-4e85-9ac1-b4ce7649c948",
+        "f054deec-6408-4fab-a2bc-5977e885db34",
+        "0a3f651e-08ed-459b-bb8c-af10a274a483",
+        "f4778249-1f63-4660-8677-815d44a851b6",
+        "58bfee68-80a5-4090-8f82-f91f4d094d75",
+        "ae2e3d18-01f8-4d92-a9c7-0f885426a175",
+        "3554ec79-4f6c-49e4-9dc1-70712b2a76eb",
+        "bfe8b8da-fb04-418e-bb4b-454f4a25978e",
+        "ad66abd1-208e-4e9c-aba1-a8a1ba4f1a42"
+      ],
+      "description": "One contact at a time: fill in the name, attach file, send via SMTP, log result, pause 5-15 seconds"
+    },
+    {
+      "id": "920efdf4-dc5e-464e-9faa-f40a6a31a961",
+      "name": "Report results",
+      "nodeIds": [
+        "36007104-0d75-46a1-aca8-cd95b3462015",
+        "a9446951-1a2e-4d18-8ea5-98bb5a030b45"
+      ],
+      "description": "After the last contact, emails you the totals for sent, failed, skipped and pending"
+    }
+  ],
+  "id": "qphD67dafoSeHQmO",
+  "tags": []
+}
