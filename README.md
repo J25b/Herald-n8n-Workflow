@@ -132,8 +132,7 @@ herald-n8n-workflow/
 ├── README.md
 ├── herald-workflow.json
 ├── sample-contacts.csv
-└── prompts/
-    └── build-prompt.md
+└── herald build prompt.md
 ```
 
 ---
