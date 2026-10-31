@@ -31,6 +31,8 @@ Think of it as an assembly line. Each step is a node in n8n.
 - A channel for approval messages (Gmail, Telegram, or Slack)
 - Google Drive access (only needed for "different file per person" attachments)
 
+To Access the workflow and see the way it works use the link below:
+https://j-herald.app.n8n.cloud/form/herald
 ---
 
 ## Setup
